@@ -6,6 +6,26 @@ platform.
 
 ## Run
 
+### Download a release (Linux x86_64)
+
+Download the `.tar.gz` archive and `SHA256SUMS` from the same
+[GitHub release](https://github.com/RubikNube/TerminalClock/releases). The binary
+requires Linux x86_64 with glibc 2.35 or newer (Ubuntu 22.04 or newer, for example).
+From the download directory, verify and extract the archive, replacing `v0.1.0`
+with the version you downloaded:
+
+```sh
+sha256sum --check SHA256SUMS
+tar -xzf terminal-clock-v0.1.0-x86_64-unknown-linux-gnu.tar.gz
+mkdir -p ~/.local/bin
+install -m 755 terminal-clock-v0.1.0-x86_64-unknown-linux-gnu/terminal-clock ~/.local/bin/terminal-clock
+```
+
+Ensure `~/.local/bin` is on your `PATH`, then run `terminal-clock`. The archive
+also includes this README, the license, and `config.example.toml`.
+
+### Build from source
+
 Install a current stable Rust toolchain, then run from this repository:
 
 ```sh
@@ -145,3 +165,21 @@ requests. The Verification workflow also supports manual runs.
 
 Tests cover configuration, key dispatch, timing transitions using controlled
 timestamps, laps, duration validation, and rendering at different terminal sizes.
+
+## Releasing
+
+Update the package version in `Cargo.toml`, run `cargo check` to update
+`Cargo.lock`, and commit both files with the release changes. Push the commit,
+then create and push a matching stable version tag:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The Release workflow accepts only `vX.Y.Z` tags matching the package version.
+It runs formatting, Clippy, and tests, builds on Ubuntu 22.04 with stable Rust,
+and verifies the archive and packaged executable before automatically publishing
+a GitHub release with generated notes, a Linux x86_64 archive, and `SHA256SUMS`.
+No additional repository secrets are required. An existing release causes
+publication to fail; reruns do not overwrite published assets.
