@@ -136,9 +136,12 @@ There is no configuration hot reload or session persistence.
 
 ```sh
 cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
 ```
+
+GitHub Actions runs these checks on Ubuntu with stable Rust for pushes and pull
+requests. The Verification workflow also supports manual runs.
 
 Tests cover configuration, key dispatch, timing transitions using controlled
 timestamps, laps, duration validation, and rendering at different terminal sizes.
