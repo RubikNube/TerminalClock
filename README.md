@@ -68,6 +68,8 @@ Exiting discards sessions; settings load at startup and are not rewritten.
 | Start, pause, resume | Space (Timer or Stopwatch) |
 | Stop and reset | `r` (Timer or Stopwatch) |
 | Edit countdown duration | `e` (Timer, when ready or finished) |
+| Open lap times in editor | `e` (Stopwatch) |
+| Copy lap times | `c` (Stopwatch) |
 | Record lap | `a` (while Stopwatch runs) |
 | Older / newer lap | `j` / `k`, Down / Up |
 | Newest / oldest lap | `g` / `G` |
@@ -191,3 +193,10 @@ Run workflow** on the default branch and enter the tag, such as `v0.1.0`. This
 builds the tagged source with the current workflow, which is useful after a
 workflow fix. The workflow must be on the default branch for manual runs to be
 available; rerunning an old failed run uses its original workflow definition.
+
+Stopwatch exports use a Markdown table with all recorded laps, oldest first, including lap number, total,
+and split times. The editor opens a temporary snapshot; changes do not affect the
+stopwatch. Timing continues while it is open. Editor selection uses `$VISUAL`,
+then `$EDITOR` (quoted arguments supported), then `nvim`, `vim`, or `vi`.
+Clipboard export requires `wl-copy` from wl-clipboard on Wayland, or `xclip`/`xsel`
+on X11. Failures appear in the app feedback area.

@@ -26,13 +26,15 @@ pub enum Action {
     Reset,
     EditTimer,
     Lap,
+    EditLaps,
+    CopyLaps,
     Acknowledge,
     Help,
     Quit,
 }
 
 impl Action {
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 18] = [
         Self::PreviousTab,
         Self::NextTab,
         Self::Clock,
@@ -46,6 +48,8 @@ impl Action {
         Self::Reset,
         Self::EditTimer,
         Self::Lap,
+        Self::EditLaps,
+        Self::CopyLaps,
         Self::Acknowledge,
         Self::Help,
         Self::Quit,
@@ -65,6 +69,8 @@ impl Action {
             Self::Toggle => "toggle",
             Self::Reset => "reset",
             Self::EditTimer => "edit_timer",
+            Self::EditLaps => "edit_laps",
+            Self::CopyLaps => "copy_laps",
             Self::Lap => "lap",
             Self::Acknowledge => "acknowledge",
             Self::Help => "help",
@@ -75,7 +81,13 @@ impl Action {
     pub fn contexts(self) -> u8 {
         match self {
             Self::EditTimer => 2,
-            Self::Lap | Self::ListDown | Self::ListUp | Self::ListFirst | Self::ListLast => 4,
+            Self::EditLaps
+            | Self::CopyLaps
+            | Self::Lap
+            | Self::ListDown
+            | Self::ListUp
+            | Self::ListFirst
+            | Self::ListLast => 4,
             Self::Toggle | Self::Reset => 6,
             _ => 7,
         }
@@ -95,6 +107,8 @@ impl Action {
             Self::Toggle => &["Space"],
             Self::Reset => &["r"],
             Self::EditTimer => &["e"],
+            Self::EditLaps => &["e"],
+            Self::CopyLaps => &["c"],
             Self::Lap => &["a"],
             Self::Acknowledge => &["Enter"],
             Self::Help => &["?"],

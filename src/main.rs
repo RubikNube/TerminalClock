@@ -1,5 +1,6 @@
 mod app;
 mod config;
+mod export;
 mod timing;
 mod ui;
 
@@ -82,6 +83,9 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Res
                     let now = Instant::now();
                     update_timer(app, now)?;
                     app.handle_key(key, now);
+                    if let Some(action) = app.export_request.take() {
+                        export::handle(terminal, app, action)?;
+                    }
                 }
                 Event::Resize(_, _) => {} // The next draw recomputes the layout.
                 _ => {}

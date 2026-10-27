@@ -43,6 +43,7 @@ pub struct App {
     pub help: bool,
     pub help_selected: usize,
     pub quit: bool,
+    pub export_request: Option<Action>,
     pub feedback: Option<String>,
 }
 
@@ -60,6 +61,7 @@ impl App {
             help: false,
             help_selected: 0,
             quit: false,
+            export_request: None,
             feedback: None,
         })
     }
@@ -161,6 +163,7 @@ impl App {
                     self.feedback = Some("Reset the timer before editing its duration".into());
                 }
             }
+            Action::EditLaps | Action::CopyLaps => self.export_request = Some(action),
             Action::Lap => self.stopwatch.lap(now),
             Action::ListDown => {
                 self.stopwatch.selected =

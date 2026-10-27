@@ -129,6 +129,13 @@ pub fn render(frame: &mut Frame, app: &App, now: Instant, local: DateTime<Local>
             };
             text.push_str(&format!(" · {} {label}", app.bindings.label(action)));
         }
+        if app.tab == 2 {
+            text.push_str(&format!(
+                " · {} edit laps · {} copy",
+                app.bindings.label(Action::EditLaps),
+                app.bindings.label(Action::CopyLaps)
+            ));
+        }
         text.push_str(&format!(
             " · {} help · {} quit",
             app.bindings.label(Action::Help),
@@ -325,6 +332,8 @@ fn render_help(frame: &mut Frame, app: &App, area: Rect) {
         (Action::Reset, "Reset"),
         (Action::EditTimer, "Edit duration"),
         (Action::Lap, "Record lap"),
+        (Action::EditLaps, "Open laps in editor"),
+        (Action::CopyLaps, "Copy laps"),
         (Action::ListDown, "Older lap"),
         (Action::ListUp, "Newer lap"),
         (Action::ListFirst, "Newest lap"),
