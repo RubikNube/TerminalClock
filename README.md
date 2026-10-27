@@ -179,7 +179,15 @@ git push origin v0.1.0
 
 The Release workflow accepts only `vX.Y.Z` tags matching the package version.
 It runs formatting, Clippy, and tests, builds on Ubuntu 22.04 with stable Rust,
-and verifies the archive and packaged executable before automatically publishing
-a GitHub release with generated notes, a Linux x86_64 archive, and `SHA256SUMS`.
-No additional repository secrets are required. An existing release causes
-publication to fail; reruns do not overwrite published assets.
+and verifies the archive and packaged executable before uploading a Linux x86_64
+archive and `SHA256SUMS`. If the GitHub release already exists (for example, you
+created it through GitHub's release page), the workflow attaches the assets and
+preserves its notes and publication status. Otherwise it creates and publishes
+a release with generated notes. No additional repository secrets are required.
+Existing assets are not overwritten; uploads fail on duplicate asset names.
+
+To retry an existing tag with the current workflow, use **Actions → Release →
+Run workflow** on the default branch and enter the tag, such as `v0.1.0`. This
+builds the tagged source with the current workflow, which is useful after a
+workflow fix. The workflow must be on the default branch for manual runs to be
+available; rerunning an old failed run uses its original workflow definition.
