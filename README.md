@@ -1,6 +1,6 @@
 # TerminalClock
 
-A Rust terminal clock, countdown timer, and stopwatch with TOML configuration
+A Rust terminal clock, countdown timer, stopwatch, and alarm with TOML configuration
 and customizable Vim-style keyboard navigation. Linux is the primary supported
 platform.
 
@@ -55,8 +55,12 @@ continues. `terminal-clock --help` lists command-line options.
 - **Stopwatch:** elapsed time to hundredths, with cumulative and split lap times.
   Laps appear newest first and can be scrolled.
 
-Both timing tools continue across tab changes, help, and terminal resizing. They
-measure elapsed time independently of rendering and wall-clock adjustments.
+- **Alarm:** one alarm at a configurable local time, with a persistent notice on
+  every tab and an optional repeating terminal bell until dismissed.
+
+All timing tools continue across tab changes, help, and terminal resizing. The
+countdown and stopwatch measure elapsed time independently of rendering and
+wall-clock adjustments. The alarm follows a scheduled wall-clock instant.
 Exiting discards sessions; settings load at startup and are not rewritten.
 
 ## Controls
@@ -64,7 +68,10 @@ Exiting discards sessions; settings load at startup and are not rewritten.
 | Action | Default keys |
 | --- | --- |
 | Previous / next tab | `h` / `l`, Shift+Tab / Tab |
-| Clock / Timer / Stopwatch | `1` / `2` / `3` |
+| Clock / Timer / Stopwatch / Alarm | `1` / `2` / `3` / `4` |
+| Enable / disable alarm | Space (Alarm) |
+| Edit alarm time | `e` (Alarm) |
+| Disable alarm and clear its notice | `r` (Alarm) |
 | Start, pause, resume | Space (Timer or Stopwatch) |
 | Stop and reset | `r` (Timer or Stopwatch) |
 | Edit countdown duration | `e` (Timer, when ready or finished) |
@@ -73,7 +80,7 @@ Exiting discards sessions; settings load at startup and are not rewritten.
 | Record lap | `a` (while Stopwatch runs) |
 | Older / newer lap | `j` / `k`, Down / Up |
 | Newest / oldest lap | `g` / `G` |
-| Dismiss completion notice | Enter |
+| Dismiss all timer and alarm notices | Enter |
 | Open / close help | `?`; Escape also closes help |
 | Quit | `q`; Ctrl+C always exits |
 
@@ -96,6 +103,27 @@ with an inline error. Adjustments can pass through `00:00:00`, but saving requir
 Editor controls are fixed and independent of configured navigation bindings.
 Reset a paused timer before changing its duration. Resetting the stopwatch also
 clears its laps. Starting a finished timer starts its full duration again.
+
+To set an alarm, press `4`, then `e`. Enter a local time in 24-hour `HH:MM`
+format (`00:00` through `23:59`), or use `h`/`l` to select hours/minutes and
+`j`/`k` to adjust them. Fields wrap independently. Enter saves and disables the
+alarm; Escape cancels without changing its time or enabled state. Press Space
+to enable it. The Alarm tab shows its scheduled date and status. Reset (`r`)
+disables it and clears its notice, retaining the configured time.
+
+An enabled alarm rings once at the next occurrence strictly after now, today or
+tomorrow, then disables itself. Enter dismisses all active notices, including
+from help. If the selected local time is skipped by a daylight-saving change,
+the alarm uses the next date where it exists; for a repeated time, it uses the
+first occurrence still in the future. A forward clock adjustment or delayed
+update past the scheduled instant triggers the alarm once. A backward adjustment
+keeps that instant pending.
+
+The application must remain running for alarms to work. An external lap editor
+blocks updates until you return, so an alarm due during that time rings on return.
+Interactive changes are not saved. Terminal settings determine whether the bell
+is audible; `alarm.bell = false` keeps just the notice, and
+`alarm.repeat_bell = false` rings once instead of every second.
 
 ## Configuration
 
@@ -124,6 +152,12 @@ default_duration = "00:25:00"
 bell = false
 repeat_bell = true # When bell is enabled, repeat until dismissed.
 
+[alarm]
+default_time = "07:00" # Local 24-hour HH:MM.
+enabled = false # Set true to schedule it at startup.
+bell = true
+repeat_bell = true
+
 [theme]
 accent = "#80cbc4"
 background = "default"
@@ -146,8 +180,7 @@ Ctrl+I and Ctrl+M are treated as aliases of Tab and Enter, including when checki
 for binding conflicts, because traditional terminals cannot distinguish them.
 
 The example lists all action names. Duplicate keys are rejected within an action
-and between actions active on the same tab. Timer-only and stopwatch-only actions
-can share keys. Remapping a key to another action may therefore require remapping
+and between actions active on the same tab. Actions used on separate tabs can share keys. Remapping a key to another action may therefore require remapping
 its original action too. Terminal or shell settings may intercept some Ctrl keys.
 
 Malformed TOML, unknown fields/actions, invalid values, unreadable files, binding

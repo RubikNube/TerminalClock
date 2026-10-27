@@ -8,7 +8,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::Color;
 use serde::Deserialize;
 
-use crate::timing::parse_duration;
+use crate::timing::{parse_alarm_time, parse_duration};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd)]
 #[serde(rename_all = "snake_case")]
@@ -18,6 +18,8 @@ pub enum Action {
     Clock,
     Timer,
     Stopwatch,
+    Alarm,
+    EditAlarm,
     ListDown,
     ListUp,
     ListFirst,
@@ -34,12 +36,14 @@ pub enum Action {
 }
 
 impl Action {
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 20] = [
         Self::PreviousTab,
         Self::NextTab,
         Self::Clock,
         Self::Timer,
         Self::Stopwatch,
+        Self::Alarm,
+        Self::EditAlarm,
         Self::ListDown,
         Self::ListUp,
         Self::ListFirst,
@@ -62,6 +66,8 @@ impl Action {
             Self::Clock => "clock",
             Self::Timer => "timer",
             Self::Stopwatch => "stopwatch",
+            Self::Alarm => "alarm",
+            Self::EditAlarm => "edit_alarm",
             Self::ListDown => "list_down",
             Self::ListUp => "list_up",
             Self::ListFirst => "list_first",
@@ -81,6 +87,7 @@ impl Action {
     pub fn contexts(self) -> u8 {
         match self {
             Self::EditTimer => 2,
+            Self::EditAlarm => 8,
             Self::EditLaps
             | Self::CopyLaps
             | Self::Lap
@@ -88,8 +95,8 @@ impl Action {
             | Self::ListUp
             | Self::ListFirst
             | Self::ListLast => 4,
-            Self::Toggle | Self::Reset => 6,
-            _ => 7,
+            Self::Toggle | Self::Reset => 14,
+            _ => 15,
         }
     }
 
@@ -100,6 +107,8 @@ impl Action {
             Self::Clock => &["1"],
             Self::Timer => &["2"],
             Self::Stopwatch => &["3"],
+            Self::Alarm => &["4"],
+            Self::EditAlarm => &["e"],
             Self::ListDown => &["j", "Down"],
             Self::ListUp => &["k", "Up"],
             Self::ListFirst => &["g"],
@@ -122,6 +131,7 @@ impl Action {
 pub struct Config {
     pub clock: ClockConfig,
     pub timer: TimerConfig,
+    pub alarm: AlarmConfig,
     pub theme: Theme,
     pub keys: BTreeMap<Action, Vec<String>>,
 }
@@ -158,6 +168,26 @@ impl Default for TimerConfig {
     fn default() -> Self {
         Self {
             default_duration: "00:05:00".into(),
+            bell: true,
+            repeat_bell: true,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AlarmConfig {
+    pub default_time: String,
+    pub enabled: bool,
+    pub bell: bool,
+    pub repeat_bell: bool,
+}
+
+impl Default for AlarmConfig {
+    fn default() -> Self {
+        Self {
+            default_time: "07:00".into(),
+            enabled: false,
             bell: true,
             repeat_bell: true,
         }
@@ -383,6 +413,7 @@ impl Config {
             return Err("clock.format must be 12h or 24h".into());
         }
         parse_duration(&self.timer.default_duration)?;
+        parse_alarm_time(&self.alarm.default_time)?;
         for value in [
             &self.theme.foreground,
             &self.theme.background,
@@ -436,6 +467,17 @@ mod tests {
         assert!(config.clock.show_date);
         assert_eq!(config.timer.default_duration, "00:05:00");
         assert!(config.timer.repeat_bell);
+        assert_eq!(config.alarm.default_time, "07:00");
+        assert!(!config.alarm.enabled);
+        assert!(config.alarm.bell && config.alarm.repeat_bell);
+        assert!(
+            Config::parse(
+                "[alarm]\nenabled = true\ndefault_time = '23:59'\nbell = false\nrepeat_bell = false"
+            )
+            .unwrap()
+            .alarm
+            .enabled
+        );
         assert!(
             !Config::parse("[timer]\nrepeat_bell = false")
                 .unwrap()
@@ -454,6 +496,11 @@ mod tests {
             "[clock]\nformat = 'bad'",
             "[timer]\ndefault_duration = '00:00:00'",
             "[timer]\nrepeat_bell = 1",
+            "[alarm]\ndefault_time = '24:00'",
+            "[alarm]\ndefault_time = '7:00'",
+            "[alarm]\nenabled = 'yes'",
+            "[alarm]\nunknown = true",
+            "[keys]\nedit_alarm = ['4']",
             "[theme]\naccent = 'orange'",
             "[keys]\nquit = []",
             "[keys]\nquit = ['h']",
@@ -474,6 +521,11 @@ mod tests {
         let key = Key::parse("a").unwrap();
         assert_eq!(b.action(key, 1), Some(Action::EditTimer));
         assert_eq!(b.action(key, 2), Some(Action::Lap));
+        assert_eq!(
+            b.action(Key::parse("e").unwrap(), 3),
+            Some(Action::EditAlarm)
+        );
+        assert_eq!(b.action(Key::parse("4").unwrap(), 0), Some(Action::Alarm));
         assert_eq!(
             Key::from_event(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::SHIFT)),
             Some(Key::parse("G").unwrap())

@@ -1,8 +1,8 @@
 [package]
 name = "terminal-clock"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
-description = "A configurable terminal clock, countdown timer, and stopwatch"
+description = "A configurable terminal clock, countdown timer, stopwatch, and alarm"
 license = "MIT"
 
 [dependencies]

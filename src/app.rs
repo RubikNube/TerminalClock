@@ -1,20 +1,40 @@
 use std::time::Instant;
 
+use chrono::{DateTime, Local};
+
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::{
     config::{Action, Bindings, Config, Key},
-    timing::{Stopwatch, Timer, format_duration, parse_duration, parse_duration_fields},
+    timing::{
+        Alarm, Stopwatch, Timer, format_duration, parse_alarm_time, parse_duration,
+        parse_duration_fields,
+    },
 };
 
 pub struct Editor {
     pub text: String,
     pub error: Option<String>,
-    /// Hours, minutes, seconds; minutes are selected when the editor opens.
+    /// Hours, minutes, and (for countdowns) seconds; initially selects minutes.
     pub selected_field: usize,
 }
 
 impl Editor {
+    fn adjust_alarm(&mut self, increase: bool) {
+        match parse_alarm_time(&self.text) {
+            Ok(time) => {
+                use chrono::Timelike;
+                let mut fields = [time.hour(), time.minute()];
+                let maximum = if self.selected_field == 0 { 24 } else { 60 };
+                let value = &mut fields[self.selected_field];
+                *value = (*value + if increase { 1 } else { maximum - 1 }) % maximum;
+                self.text = format!("{:02}:{:02}", fields[0], fields[1]);
+                self.error = None;
+            }
+            Err(error) => self.error = Some(error),
+        }
+    }
+
     fn adjust(&mut self, increase: bool) {
         match parse_duration_fields(&self.text) {
             Ok(mut fields) => {
@@ -39,6 +59,7 @@ pub struct App {
     pub tab: usize,
     pub timer: Timer,
     pub stopwatch: Stopwatch,
+    pub alarm: Alarm,
     pub editor: Option<Editor>,
     pub help: bool,
     pub help_selected: usize,
@@ -51,12 +72,17 @@ impl App {
     pub fn new(config: Config) -> Result<Self, String> {
         let bindings = config.bindings()?;
         let duration = parse_duration(&config.timer.default_duration)?;
+        let mut alarm = Alarm::new(parse_alarm_time(&config.alarm.default_time)?);
+        if config.alarm.enabled {
+            alarm.toggle(&Local::now())?;
+        }
         Ok(Self {
             config,
             bindings,
             tab: 0,
             timer: Timer::new(duration),
             stopwatch: Stopwatch::default(),
+            alarm,
             editor: None,
             help: false,
             help_selected: 0,
@@ -67,6 +93,11 @@ impl App {
     }
 
     pub fn handle_key(&mut self, event: KeyEvent, now: Instant) {
+        self.handle_key_at(event, now, Local::now());
+    }
+
+    pub fn handle_key_at(&mut self, event: KeyEvent, now: Instant, local: DateTime<Local>) {
+        let alarm_editor = self.tab == 3;
         let adjustment_repeat = self.editor.is_some()
             && event.kind == KeyEventKind::Repeat
             && matches!(event.code, KeyCode::Char('j' | 'k'));
@@ -91,10 +122,27 @@ impl App {
                 KeyCode::Char('h') => {
                     editor.selected_field = editor.selected_field.saturating_sub(1)
                 }
-                KeyCode::Char('l') => editor.selected_field = (editor.selected_field + 1).min(2),
-                KeyCode::Char('j') => editor.adjust(false),
-                KeyCode::Char('k') => editor.adjust(true),
+                KeyCode::Char('l') => {
+                    editor.selected_field =
+                        (editor.selected_field + 1).min(if alarm_editor { 1 } else { 2 })
+                }
+                KeyCode::Char('j' | 'k') => {
+                    let increase = event.code == KeyCode::Char('k');
+                    if alarm_editor {
+                        editor.adjust_alarm(increase);
+                    } else {
+                        editor.adjust(increase);
+                    }
+                }
                 KeyCode::Esc => self.editor = None,
+                KeyCode::Enter if alarm_editor => match parse_alarm_time(&editor.text) {
+                    Ok(time) => {
+                        self.alarm.reset();
+                        self.alarm.time = time;
+                        self.editor = None;
+                    }
+                    Err(error) => editor.error = Some(error),
+                },
                 KeyCode::Enter => match parse_duration(&editor.text) {
                     Ok(duration) => {
                         self.timer.duration = duration;
@@ -107,7 +155,10 @@ impl App {
                     editor.text.pop();
                     editor.error = None;
                 }
-                KeyCode::Char(c) if (c.is_ascii_digit() || c == ':') && editor.text.len() < 8 => {
+                KeyCode::Char(c)
+                    if (c.is_ascii_digit() || c == ':')
+                        && editor.text.len() < if alarm_editor { 5 } else { 8 } =>
+                {
                     editor.text.push(c);
                     editor.error = None;
                 }
@@ -127,6 +178,7 @@ impl App {
                 self.quit = true;
             } else if self.bindings.matches(Action::Acknowledge, key) {
                 self.timer.notice = false;
+                self.alarm.notice = false;
             } else if self.bindings.matches(Action::ListDown, key) {
                 self.help_selected = self.help_selected.saturating_add(1).min(last);
             } else if self.bindings.matches(Action::ListUp, key) {
@@ -143,15 +195,29 @@ impl App {
             return;
         };
         match action {
-            Action::PreviousTab => self.tab = (self.tab + 2) % 3,
-            Action::NextTab => self.tab = (self.tab + 1) % 3,
+            Action::PreviousTab => self.tab = (self.tab + 3) % 4,
+            Action::NextTab => self.tab = (self.tab + 1) % 4,
             Action::Clock => self.tab = 0,
             Action::Timer => self.tab = 1,
             Action::Stopwatch => self.tab = 2,
+            Action::Alarm => self.tab = 3,
+            Action::Toggle if self.tab == 3 => {
+                if let Err(error) = self.alarm.toggle(&local) {
+                    self.feedback = Some(error);
+                }
+            }
             Action::Toggle if self.tab == 1 => self.timer.toggle(now),
             Action::Toggle => self.stopwatch.elapsed.toggle(now),
+            Action::Reset if self.tab == 3 => self.alarm.reset(),
             Action::Reset if self.tab == 1 => self.timer.reset(),
             Action::Reset => self.stopwatch.reset(),
+            Action::EditAlarm => {
+                self.editor = Some(Editor {
+                    text: self.alarm.time.format("%H:%M").to_string(),
+                    error: None,
+                    selected_field: 1,
+                });
+            }
             Action::EditTimer => {
                 if self.timer.editable(now) {
                     self.editor = Some(Editor {
@@ -174,7 +240,10 @@ impl App {
             Action::ListLast => {
                 self.stopwatch.selected = self.stopwatch.laps.len().saturating_sub(1)
             }
-            Action::Acknowledge => self.timer.notice = false,
+            Action::Acknowledge => {
+                self.timer.notice = false;
+                self.alarm.notice = false;
+            }
             Action::Help => {
                 self.help = true;
                 self.help_selected = 0;
@@ -428,5 +497,90 @@ mod tests {
         assert_eq!(app.help_selected, last - 1);
         press(&mut app, KeyCode::Esc, now);
         assert!(!app.help);
+    }
+}
+
+#[cfg(test)]
+mod alarm_tests {
+    use super::*;
+
+    fn press(app: &mut App, code: KeyCode) {
+        app.handle_key_at(
+            KeyEvent::new(code, KeyModifiers::NONE),
+            Instant::now(),
+            "2024-01-01T06:00:00Z"
+                .parse::<DateTime<chrono::Utc>>()
+                .unwrap()
+                .with_timezone(&Local),
+        );
+    }
+
+    #[test]
+    fn fourth_tab_controls_editing_and_notice_dismissal() {
+        let mut app = App::new(Config::default()).unwrap();
+        press(&mut app, KeyCode::Char('h'));
+        assert_eq!(app.tab, 3);
+        press(&mut app, KeyCode::Char('l'));
+        assert_eq!(app.tab, 0);
+        press(&mut app, KeyCode::Char('4'));
+        press(&mut app, KeyCode::Char(' '));
+        assert!(app.alarm.target.is_some());
+        let original = app.alarm.time;
+        press(&mut app, KeyCode::Char('e'));
+        press(&mut app, KeyCode::Char('k'));
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.alarm.time, original);
+        assert!(app.alarm.target.is_some());
+        press(&mut app, KeyCode::Char('e'));
+        app.editor.as_mut().unwrap().text = "23:59".into();
+        for c in "hklk".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+        assert_eq!(app.editor.as_ref().unwrap().text, "00:00");
+        app.editor.as_mut().unwrap().text = "24:00".into();
+        press(&mut app, KeyCode::Enter);
+        assert!(app.editor.as_ref().unwrap().error.is_some());
+        app.editor.as_mut().unwrap().text = "00:00".into();
+        press(&mut app, KeyCode::Enter);
+        assert!(app.editor.is_none() && app.alarm.target.is_none());
+        assert_eq!(app.alarm.time, parse_alarm_time("00:00").unwrap());
+        press(&mut app, KeyCode::Char(' '));
+        press(&mut app, KeyCode::Char('r'));
+        assert!(app.alarm.target.is_none());
+        for help in [false, true] {
+            app.help = help;
+            app.timer.notice = true;
+            app.alarm.notice = true;
+            press(&mut app, KeyCode::Enter);
+            assert!(!app.timer.notice && !app.alarm.notice);
+        }
+    }
+
+    #[test]
+    fn configured_alarm_is_scheduled_at_startup() {
+        let app =
+            App::new(Config::parse("[alarm]\ndefault_time = '12:34'\nenabled = true").unwrap())
+                .unwrap();
+        assert_eq!(app.alarm.time, parse_alarm_time("12:34").unwrap());
+        assert!(app.alarm.target.is_some());
+        assert!(!app.alarm.notice);
+    }
+
+    #[test]
+    fn alarm_editor_field_wrapping_and_incomplete_input() {
+        let mut editor = Editor {
+            text: "00:00".into(),
+            selected_field: 0,
+            error: None,
+        };
+        editor.adjust_alarm(false);
+        assert_eq!(editor.text, "23:00");
+        editor.selected_field = 1;
+        editor.adjust_alarm(false);
+        assert_eq!(editor.text, "23:59");
+        editor.text = "07:".into();
+        editor.adjust_alarm(true);
+        assert_eq!(editor.text, "07:");
+        assert!(editor.error.is_some());
     }
 }

@@ -13,6 +13,12 @@ default_duration = "00:05:00" # HH:MM:SS, 00:00:01 through 99:59:59
 bell = true # Terminal settings determine whether the bell is audible.
 repeat_bell = true # Ring every second until dismissed; false rings just once.
 
+[alarm]
+default_time = "07:00" # Local 24-hour HH:MM, 00:00 through 23:59.
+enabled = false # Schedule the next occurrence at startup when true.
+bell = true
+repeat_bell = true # Ring every second until dismissed; false rings just once.
+
 [theme]
 # ANSI names: black, red, green, yellow, blue, magenta, cyan, gray,
 # dark_gray, light_red, light_green, light_yellow, light_blue,
@@ -32,6 +38,8 @@ next_tab = ["l", "Tab"]
 clock = ["1"]
 timer = ["2"]
 stopwatch = ["3"]
+alarm = ["4"]
+edit_alarm = ["e"]
 list_down = ["j", "Down"]
 list_up = ["k", "Up"]
 list_first = ["g"]

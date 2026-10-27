@@ -48,11 +48,19 @@ pub fn render(frame: &mut Frame, app: &App, now: Instant, local: DateTime<Local>
         area,
     );
     if area.width < 40 || area.height < 16 {
-        let notice = if app.timer.notice {
-            "\nTIMER FINISHED"
-        } else {
-            ""
-        };
+        let notice = format!(
+            "{}{}",
+            if app.timer.notice {
+                "\nTIMER FINISHED"
+            } else {
+                ""
+            },
+            if app.alarm.notice {
+                "\nALARM RINGING"
+            } else {
+                ""
+            }
+        );
         let text = format!(
             "TerminalClock\nResize to at least 40 × 16{notice}\n{} quit · Ctrl+C exit",
             app.bindings.label(Action::Quit)
@@ -62,7 +70,11 @@ pub fn render(frame: &mut Frame, app: &App, now: Instant, local: DateTime<Local>
     }
     let chunks = Layout::vertical([
         Constraint::Length(3),
-        Constraint::Length(if app.timer.notice { 3 } else { 0 }),
+        Constraint::Length(if app.timer.notice || app.alarm.notice {
+            2 + u16::from(app.timer.notice) + u16::from(app.alarm.notice)
+        } else {
+            0
+        }),
         Constraint::Min(1),
         Constraint::Length(3),
     ])
@@ -71,18 +83,28 @@ pub fn render(frame: &mut Frame, app: &App, now: Instant, local: DateTime<Local>
         format!("{} Clock", app.bindings.label(Action::Clock)),
         format!("{} Timer", app.bindings.label(Action::Timer)),
         format!("{} Stopwatch", app.bindings.label(Action::Stopwatch)),
+        format!("{} Alarm", app.bindings.label(Action::Alarm)),
     ];
     frame.render_widget(
         Tabs::new(titles)
+            .padding("", "")
             .select(app.tab)
             .highlight_style(accent(app).add_modifier(Modifier::BOLD))
             .block(Block::bordered().title(" TerminalClock ")),
         chunks[0],
     );
-    if app.timer.notice {
+    if app.timer.notice || app.alarm.notice {
+        let mut notices = Vec::new();
+        if app.timer.notice {
+            notices.push("Timer finished");
+        }
+        if app.alarm.notice {
+            notices.push("Alarm ringing");
+        }
         frame.render_widget(
             Paragraph::new(format!(
-                "Timer finished · {} dismiss",
+                "{} · {} dismiss",
+                notices.join("\n"),
                 app.bindings.label(Action::Acknowledge)
             ))
             .alignment(Alignment::Center)
@@ -97,7 +119,8 @@ pub fn render(frame: &mut Frame, app: &App, now: Instant, local: DateTime<Local>
         match app.tab {
             0 => render_clock(frame, app, local, chunks[2]),
             1 => render_timer(frame, app, now, chunks[2]),
-            _ => render_stopwatch(frame, app, now, chunks[2]),
+            2 => render_stopwatch(frame, app, now, chunks[2]),
+            _ => render_alarm(frame, app, chunks[2]),
         }
     }
     let hints = if app.editor.is_some() {
@@ -118,12 +141,19 @@ pub fn render(frame: &mut Frame, app: &App, now: Instant, local: DateTime<Local>
         );
         if app.tab != 0 {
             text.push_str(&format!(
-                " · {} start/pause · {} reset",
+                " · {} {} · {} reset",
                 app.bindings.label(Action::Toggle),
+                if app.tab == 3 {
+                    "enable/disable"
+                } else {
+                    "start/pause"
+                },
                 app.bindings.label(Action::Reset)
             ));
             let (action, label) = if app.tab == 1 {
                 (Action::EditTimer, "edit")
+            } else if app.tab == 3 {
+                (Action::EditAlarm, "edit")
             } else {
                 (Action::Lap, "lap")
             };
@@ -174,6 +204,34 @@ fn render_clock(frame: &mut Frame, app: &App, local: DateTime<Local>, area: Rect
         app,
         &time,
         lines,
+        app.config.clock.large_digits,
+        area,
+    );
+}
+
+fn render_alarm(frame: &mut Frame, app: &App, area: Rect) {
+    let status = if app.alarm.notice {
+        "RINGING"
+    } else if app.alarm.target.is_some() {
+        "ENABLED"
+    } else {
+        "DISABLED"
+    };
+    let mut details = vec![status.into(), "Local time · one-shot alarm".into()];
+    if let Some(target) = app.alarm.target {
+        details.push(format!(
+            "Scheduled {}",
+            target.with_timezone(&Local).format("%Y-%m-%d %H:%M %:z")
+        ));
+    }
+    if let Some(feedback) = &app.feedback {
+        details.push(feedback.clone());
+    }
+    render_digits(
+        frame,
+        app,
+        &app.alarm.time.format("%H:%M").to_string(),
+        details,
         app.config.clock.large_digits,
         area,
     );
@@ -328,7 +386,16 @@ fn render_help(frame: &mut Frame, app: &App, area: Rect) {
         (Action::Clock, "Clock"),
         (Action::Timer, "Timer"),
         (Action::Stopwatch, "Stopwatch"),
-        (Action::Toggle, "Start / pause"),
+        (Action::Alarm, "Alarm"),
+        (Action::EditAlarm, "Edit alarm time"),
+        (
+            Action::Toggle,
+            if app.tab == 3 {
+                "Enable / disable alarm"
+            } else {
+                "Start / pause"
+            },
+        ),
         (Action::Reset, "Reset"),
         (Action::EditTimer, "Edit duration"),
         (Action::Lap, "Record lap"),
@@ -411,7 +478,11 @@ fn render_editor(frame: &mut Frame, app: &App, area: Rect) {
         Paragraph::new(lines)
             .style(base)
             .wrap(Wrap { trim: true })
-            .block(Block::bordered().title(" Edit countdown ")),
+            .block(Block::bordered().title(if app.tab == 3 {
+                " Edit alarm · HH:MM "
+            } else {
+                " Edit countdown "
+            })),
         popup,
     );
 }
@@ -536,5 +607,42 @@ mod tests {
         assert!(text.contains(&local.format("%p").to_string()));
         assert!(!text.contains("UTC"));
         assert!(!text.contains(&local.format("%A").to_string()));
+    }
+}
+
+#[cfg(test)]
+mod alarm_tests {
+    use super::*;
+    use crate::config::Config;
+    use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn alarm_and_combined_alerts_render_on_all_tabs_and_sizes() {
+        let mut app = App::new(Config::default()).unwrap();
+        app.timer.notice = true;
+        app.alarm.notice = true;
+        for tab in 0..4 {
+            app.tab = tab;
+            for (width, height) in [(0, 0), (1, 1), (20, 8), (40, 16), (80, 24)] {
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                terminal
+                    .draw(|frame| render(frame, &app, Instant::now(), Local::now()))
+                    .unwrap();
+                let text: String = terminal
+                    .backend()
+                    .buffer()
+                    .content
+                    .iter()
+                    .map(|cell| cell.symbol())
+                    .collect();
+                if width >= 40 {
+                    assert!(text.contains("4 Alarm"));
+                    assert!(text.contains("Timer finished"));
+                    assert!(text.contains("Alarm ringing"));
+                } else if width == 20 {
+                    assert!(text.contains("ALARM RINGING"));
+                }
+            }
+        }
     }
 }

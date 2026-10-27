@@ -1,3 +1,5 @@
+use chrono::{DateTime, LocalResult, NaiveTime, TimeZone, Utc};
+
 use std::time::{Duration, Instant};
 
 pub fn parse_duration(input: &str) -> Result<Duration, String> {
@@ -293,5 +295,239 @@ mod tests {
         assert!(timer.bell_due(end, false));
         assert!(!timer.bell_due(end + Duration::from_secs(100), false));
         assert!(timer.notice);
+    }
+}
+
+/// Alarm input always uses 24-hour time, independent of clock display settings.
+pub fn parse_alarm_time(input: &str) -> Result<NaiveTime, String> {
+    let bytes = input.as_bytes();
+    if bytes.len() != 5
+        || bytes[2] != b':'
+        || !bytes
+            .iter()
+            .enumerate()
+            .all(|(i, b)| i == 2 || b.is_ascii_digit())
+    {
+        return Err("Enter a complete HH:MM time (00:00 through 23:59)".into());
+    }
+    NaiveTime::from_hms_opt(input[..2].parse().unwrap(), input[3..].parse().unwrap(), 0)
+        .ok_or_else(|| "Hours must be 00–23; minutes must be 00–59".into())
+}
+
+/// Resolve each local date separately to handle missing and repeated local times.
+pub fn next_alarm<T: TimeZone>(
+    time: NaiveTime,
+    now: &DateTime<T>,
+) -> Result<DateTime<Utc>, String> {
+    let mut date = now.date_naive();
+    loop {
+        let candidates = match now.timezone().from_local_datetime(&date.and_time(time)) {
+            LocalResult::Single(value) => vec![value],
+            LocalResult::Ambiguous(a, b) => vec![a, b],
+            LocalResult::None => vec![],
+        };
+        if let Some(next) = candidates.into_iter().filter(|value| value > now).min() {
+            return Ok(next.with_timezone(&Utc));
+        }
+        date = date
+            .succ_opt()
+            .ok_or("Cannot schedule an alarm beyond the supported date range")?;
+    }
+}
+
+pub struct Alarm {
+    pub time: NaiveTime,
+    pub target: Option<DateTime<Utc>>,
+    pub notice: bool,
+    last_bell: Option<Instant>,
+}
+
+impl Alarm {
+    pub fn new(time: NaiveTime) -> Self {
+        Self {
+            time,
+            target: None,
+            notice: false,
+            last_bell: None,
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.target = None;
+        self.notice = false;
+        self.last_bell = None;
+    }
+
+    pub fn toggle<T: TimeZone>(&mut self, now: &DateTime<T>) -> Result<(), String> {
+        if self.target.is_some() {
+            self.reset();
+        } else {
+            let target = next_alarm(self.time, now)?;
+            self.reset();
+            self.target = Some(target);
+        }
+        Ok(())
+    }
+
+    pub fn tick(&mut self, now: DateTime<Utc>) -> bool {
+        if self.target.is_some_and(|target| now >= target) {
+            self.target = None;
+            self.notice = true;
+            self.last_bell = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn bell_due(&mut self, now: Instant, repeat: bool) -> bool {
+        if self.notice
+            && self
+                .last_bell
+                .is_none_or(|last| repeat && now.duration_since(last) >= Duration::from_secs(1))
+        {
+            self.last_bell = Some(now);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+#[cfg(test)]
+mod alarm_tests {
+    use super::*;
+    use chrono::{FixedOffset, NaiveDate, NaiveDateTime};
+
+    fn utc(value: &str) -> DateTime<Utc> {
+        value.parse().unwrap()
+    }
+
+    #[test]
+    fn alarm_time_validation_and_next_occurrence() {
+        for bad in [
+            "7:30", "24:00", "12:60", "07:30:00", " 07:30", "aa:bb", "é:00", "",
+        ] {
+            assert!(parse_alarm_time(bad).is_err(), "{bad}");
+        }
+        let midnight = parse_alarm_time("00:00").unwrap();
+        assert_eq!(
+            next_alarm(midnight, &utc("2024-01-01T23:59:00Z")).unwrap(),
+            utc("2024-01-02T00:00:00Z")
+        );
+        assert_eq!(
+            next_alarm(midnight, &utc("2024-01-02T00:00:00Z")).unwrap(),
+            utc("2024-01-03T00:00:00Z")
+        );
+        assert!(parse_alarm_time("23:59").is_ok());
+        let zone = FixedOffset::east_opt(3600).unwrap();
+        let now = utc("2024-01-01T05:00:00Z").with_timezone(&zone);
+        assert_eq!(
+            next_alarm(parse_alarm_time("07:00").unwrap(), &now).unwrap(),
+            utc("2024-01-01T06:00:00Z")
+        );
+    }
+
+    #[test]
+    fn alarm_triggers_once_after_delays_and_can_be_rearmed() {
+        let start = utc("2024-01-01T06:00:00Z");
+        let mut alarm = Alarm::new(parse_alarm_time("07:00").unwrap());
+        alarm.toggle(&start).unwrap();
+        let target = alarm.target;
+        assert!(!alarm.tick(start - chrono::Duration::hours(1)));
+        assert_eq!(alarm.target, target);
+        assert!(!alarm.tick(start + chrono::Duration::minutes(59)));
+        assert!(alarm.tick(start + chrono::Duration::hours(2)));
+        assert!(alarm.notice && alarm.target.is_none());
+        assert!(!alarm.tick(start + chrono::Duration::hours(3)));
+        alarm.toggle(&(start + chrono::Duration::hours(3))).unwrap();
+        assert!(!alarm.notice);
+        assert_eq!(alarm.target.unwrap(), utc("2024-01-02T07:00:00Z"));
+        alarm.toggle(&start).unwrap();
+        assert!(alarm.target.is_none());
+        assert!(!alarm.tick(utc("2024-01-03T00:00:00Z")));
+    }
+
+    #[test]
+    fn alarm_bells_repeat_or_ring_once_and_stop_on_dismissal_or_reset() {
+        let start = utc("2024-01-01T06:00:00Z");
+        let now = Instant::now();
+        for repeat in [false, true] {
+            let mut alarm = Alarm::new(parse_alarm_time("07:00").unwrap());
+            alarm.toggle(&start).unwrap();
+            assert!(!alarm.bell_due(now, repeat));
+            alarm.tick(start + chrono::Duration::hours(1));
+            assert!(alarm.bell_due(now, repeat));
+            assert!(!alarm.bell_due(now + Duration::from_millis(999), repeat));
+            assert_eq!(
+                alarm.bell_due(now + Duration::from_secs(20), repeat),
+                repeat
+            );
+            assert!(!alarm.bell_due(now + Duration::from_secs(20), repeat));
+            alarm.notice = false;
+            assert!(!alarm.bell_due(now + Duration::from_secs(21), repeat));
+            alarm.reset();
+            assert!(!alarm.notice && alarm.target.is_none());
+        }
+    }
+
+    // Deterministic timezone with Europe's 2024 spring gap and autumn overlap.
+    // Avoid changing process-global TZ or depending on the host's timezone database.
+    #[derive(Clone)]
+    struct TestZone;
+
+    fn naive(value: &str) -> NaiveDateTime {
+        value.parse().unwrap()
+    }
+    fn offset(hours: i32) -> FixedOffset {
+        FixedOffset::east_opt(hours * 3600).unwrap()
+    }
+
+    impl TimeZone for TestZone {
+        type Offset = FixedOffset;
+        fn from_offset(_: &FixedOffset) -> Self {
+            Self
+        }
+        fn offset_from_local_date(&self, date: &NaiveDate) -> LocalResult<FixedOffset> {
+            self.offset_from_local_datetime(&date.and_hms_opt(12, 0, 0).unwrap())
+        }
+        fn offset_from_local_datetime(&self, local: &NaiveDateTime) -> LocalResult<FixedOffset> {
+            if *local < naive("2024-03-31T02:00:00") || *local >= naive("2024-10-27T03:00:00") {
+                LocalResult::Single(offset(1))
+            } else if *local < naive("2024-03-31T03:00:00") {
+                LocalResult::None
+            } else if *local >= naive("2024-10-27T02:00:00") {
+                // Intentionally put the later occurrence first.
+                LocalResult::Ambiguous(offset(1), offset(2))
+            } else {
+                LocalResult::Single(offset(2))
+            }
+        }
+        fn offset_from_utc_date(&self, date: &NaiveDate) -> FixedOffset {
+            self.offset_from_utc_datetime(&date.and_hms_opt(12, 0, 0).unwrap())
+        }
+        fn offset_from_utc_datetime(&self, utc: &NaiveDateTime) -> FixedOffset {
+            if *utc >= naive("2024-03-31T01:00:00") && *utc < naive("2024-10-27T01:00:00") {
+                offset(2)
+            } else {
+                offset(1)
+            }
+        }
+    }
+
+    #[test]
+    fn skips_missing_times_and_selects_first_future_ambiguous_occurrence() {
+        let time = parse_alarm_time("02:30").unwrap();
+        for (now, expected) in [
+            ("2024-03-30T23:00:00Z", "2024-04-01T00:30:00Z"),
+            ("2024-10-26T23:00:00Z", "2024-10-27T00:30:00Z"),
+            ("2024-10-27T00:45:00Z", "2024-10-27T01:30:00Z"),
+            ("2024-10-27T01:30:00Z", "2024-10-28T01:30:00Z"),
+        ] {
+            assert_eq!(
+                next_alarm(time, &utc(now).with_timezone(&TestZone)).unwrap(),
+                utc(expected)
+            );
+        }
     }
 }
