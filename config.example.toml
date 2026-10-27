@@ -1,0 +1,45 @@
+# Copy to ~/.config/terminal-clock/config.toml, or pass --config PATH.
+# All fields are optional. Omitted fields and actions retain built-in defaults.
+# Settings load at startup; sessions are never saved.
+
+[clock]
+format = "24h" # "24h" or "12h"
+show_date = true
+show_timezone = true
+large_digits = true
+
+[timer]
+default_duration = "00:05:00" # HH:MM:SS, 00:00:01 through 99:59:59
+bell = true # Terminal settings determine whether the bell is audible.
+repeat_bell = true # Ring every second until dismissed; false rings just once.
+
+[theme]
+# ANSI names: black, red, green, yellow, blue, magenta, cyan, gray,
+# dark_gray, light_red, light_green, light_yellow, light_blue,
+# light_magenta, light_cyan, white. Also: "default" or "#RRGGBB".
+foreground = "white"
+background = "default"
+accent = "cyan"
+error = "red"
+
+[keys]
+# Single characters are case-sensitive. Named keys: Enter, Tab, BackTab,
+# Esc, Space, Up, Down, Left, Right, Home, End, Backspace; Ctrl+<letter>.
+# Each array replaces the entire binding list for that action.
+# Ctrl+C is reserved. Overlapping actions cannot share keys.
+previous_tab = ["h", "BackTab"]
+next_tab = ["l", "Tab"]
+clock = ["1"]
+timer = ["2"]
+stopwatch = ["3"]
+list_down = ["j", "Down"]
+list_up = ["k", "Up"]
+list_first = ["g"]
+list_last = ["G"]
+toggle = ["Space"]
+reset = ["r"]
+edit_timer = ["e"]
+lap = ["a"]
+acknowledge = ["Enter"]
+help = ["?"]
+quit = ["q"]
